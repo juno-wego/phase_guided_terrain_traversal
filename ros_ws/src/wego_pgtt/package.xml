@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>wego_pgtt</name>
+  <version>0.0.0</version>
+  <description>PGTT mode management for the real Go2 stair-climbing stack.</description>
+  <maintainer email="wego@example.com">wego</maintainer>
+  <license>TODO: License declaration</license>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>transform_sensors</exec_depend>
+  <exec_depend>point_lio</exec_depend>
+  <exec_depend>go2_base</exec_depend>
+  <exec_depend>go2_description</exec_depend>
+  <exec_depend>elevation_mapping</exec_depend>
+  <exec_depend>heightmap_node</exec_depend>
+  <exec_depend>grid_map_filter_node</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

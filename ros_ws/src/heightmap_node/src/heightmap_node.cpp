@@ -31,7 +31,20 @@ void HeightmapNode::gridMapCallback(const grid_map_msgs::msg::GridMap::SharedPtr
   tf2::Stamped<tf2::Transform> transform;
   geometry_msgs::msg::TransformStamped transform_msg;
 
-  transform_msg = transformBuffer_->lookupTransform("start", "base_link" , rclcpp::Time(0), rclcpp::Duration::from_seconds(5.0));
+  try {
+    transform_msg = transformBuffer_->lookupTransform(
+      map_frame_, base_frame_, rclcpp::Time(0), rclcpp::Duration::from_seconds(5.0));
+  } catch (tf2::TransformException & ex) {
+    RCLCPP_WARN_THROTTLE(
+      this->get_logger(),
+      *this->get_clock(),
+      2000,
+      "Skipping heightmap export until TF %s <- %s is available: %s",
+      map_frame_.c_str(),
+      base_frame_.c_str(),
+      ex.what());
+    return;
+  }
   tf2::fromMsg(transform_msg, transform);
   double roll, pitch, yaw;
 
@@ -43,6 +56,7 @@ void HeightmapNode::gridMapCallback(const grid_map_msgs::msg::GridMap::SharedPtr
                          transform.getOrigin().z());
   getHeightMap(map,position,-yaw);
 
+  cloud_msg.header.stamp = msg->header.stamp;
   height_map_pub_->publish(cloud_msg);
 }
 
@@ -50,6 +64,7 @@ void HeightmapNode::getHeightMap(grid_map::GridMap& map, const Eigen::Vector3d& 
     Eigen::Matrix2f R_W2H;
     R_W2H << std::cos(yaw),  std::sin(yaw),
             -std::sin(yaw),  std::cos(yaw);
+    const float fallback_elevation = static_cast<float>(position.z());
 
     float c_h = (num_heightscans - 1) / 2.0f;
     float c_w = (num_widthscans - 1) / 2.0f;
@@ -66,13 +81,13 @@ void HeightmapNode::getHeightMap(grid_map::GridMap& map, const Eigen::Vector3d& 
             grid_map::Position gridPos(query_pos.x(), query_pos.y());
             grid_map::Index index;
 
-            float elevation = 0.0;//std::numeric_limits<float>::quiet_NaN();  // Default if index is invalid
+            float elevation = fallback_elevation;
 
             if (map.getIndex(gridPos, index)) {
                 elevation = map.at(layer, index);
             }
             if (std::isnan(elevation)) {
-                elevation = 0.0f;
+                elevation = fallback_elevation;
             }
             size_t point_offset = i * cloud_msg.row_step + j * cloud_msg.point_step;
 
@@ -94,6 +109,8 @@ void HeightmapNode::read_parameters(){
   this->declare_parameter("output","elevation_heightmap");
   this->declare_parameter("input","elevation_map");
   this->declare_parameter("layer","elevation");
+  this->declare_parameter("map_frame","start");
+  this->declare_parameter("base_frame","base_link");
 
   this->get_parameter("num_heightscans",num_heightscans);
   this->get_parameter("num_widthscans",num_widthscans);
@@ -102,14 +119,13 @@ void HeightmapNode::read_parameters(){
   this->get_parameter("input",input_name);
   this->get_parameter("output",output_name);
   this->get_parameter("layer",layer);
+  this->get_parameter("map_frame",map_frame_);
+  this->get_parameter("base_frame",base_frame_);
 
 }
 void HeightmapNode::initialize(){
-    float dx = 0.1f;  // grid spacing in x-direction
-    float dy = 0.1f;  // grid spacing in y-direction
-
     cloud_msg.header.stamp = rclcpp::Clock().now();
-    cloud_msg.header.frame_id = "start";
+    cloud_msg.header.frame_id = map_frame_;
 
     sensor_msgs::msg::PointField x_field;
     x_field.name = "x";
@@ -142,8 +158,8 @@ void HeightmapNode::initialize(){
         {
             size_t point_offset = row * cloud_msg.row_step + col * cloud_msg.point_step;
 
-            float x = col * dx;
-            float y = row * dy;
+            float x = static_cast<float>(col) * static_cast<float>(dist_x);
+            float y = static_cast<float>(row) * static_cast<float>(dist_y);
             float z = static_cast<float>(row);  
 
             std::memcpy(&cloud_msg.data[point_offset + x_field.offset], &x, sizeof(float));
@@ -159,4 +175,3 @@ int main(int argc, char **argv)
   rclcpp::shutdown();
   return 0;
 }
-

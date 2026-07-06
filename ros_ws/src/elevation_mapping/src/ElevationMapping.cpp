@@ -159,20 +159,22 @@ ElevationMapping::~ElevationMapping() {
     rawSubmapService_.reset();
     fusionTriggerService_.reset();
     fusedSubmapService_.reset();
-    fusedMapPublishTimer_->cancel();
+    if (fusedMapPublishTimer_) {
+      fusedMapPublishTimer_->cancel();
+    }
 
     // fusionServiceQueue_.disable();
     // fusionServiceQueue_.clear();
   }
 
   {  // Visibility cleanup queue
-    visibilityCleanupTimer_->cancel();
+    if (visibilityCleanupTimer_) {
+      visibilityCleanupTimer_->cancel();
+    }
 
     // visibilityCleanupQueue_.disable();
     // visibilityCleanupQueue_.clear();
   }
-
-  rclcpp::shutdown();
 
   // Join threads.
   /*if (fusionServiceThread_.joinable()) {
@@ -360,7 +362,9 @@ bool ElevationMapping::initialize() {
   //fusionServiceThread_ = std::thread(boost::bind(&ElevationMapping::runFusionServiceThread, this));
   rclcpp::sleep_for(std::chrono::seconds(1));  // Need this to get the TF caches fill up.
   // resetMapUpdateTimer();
-  fusedMapPublishTimer_->reset();
+  if (fusedMapPublishTimer_) {
+    fusedMapPublishTimer_->reset();
+  }
   // visibilityCleanupThread_ = boost::thread(boost::bind(&ElevationMapping::visibilityCleanupThread, this));
   // visibilityCleanupTimer_.reset();  //TODO:foxy does not have timer autostart flag implemented, fix in future version
   initializeElevationMap();
@@ -396,7 +400,7 @@ map_.heightmap_msg.width = map_.num_widthscans;
 map_.heightmap_msg.is_bigendian = false;
 map_.heightmap_msg.point_step = 3 * sizeof(float);  // x, y, z
 map_.heightmap_msg.row_step = map_.heightmap_msg.point_step * map_.heightmap_msg.width;
-map_.heightmap_msg.is_dense = true;
+map_.heightmap_msg.is_dense = false;
 
 // Allocate data buffer
 map_.heightmap_msg.data.resize(map_.heightmap_msg.row_step * map_.heightmap_msg.height);
@@ -526,7 +530,14 @@ void ElevationMapping::pointCloudCallback(sensor_msgs::msg::PointCloud2::ConstSh
   boost::recursive_mutex::scoped_lock scopedLock(map_.getRawDataMutex());
 
   // Update map location.
-  updateMapLocation();
+  if (!updateMapLocation()) {
+    RCLCPP_WARN_THROTTLE(
+        nodeHandle_->get_logger(),
+        *nodeHandle_->get_clock(),
+        2000,
+        "Skipping point cloud update until the map tracking TF is available.");
+    return;
+  }
 
   // Update map from motion prediction.
   if (!updatePrediction(lastPointCloudUpdateTime_)) {
@@ -610,8 +621,20 @@ void ElevationMapping::publishFusedMapCallback() {
 
   tf2::Stamped<tf2::Transform> transform;
   geometry_msgs::msg::TransformStamped transform_msg;
-
-  transform_msg = transformBuffer_->lookupTransform(mapFrameId_, trackPointFrameId_ , rclcpp::Time(0), rclcpp::Duration::from_seconds(5.0));
+  try {
+    transform_msg = transformBuffer_->lookupTransform(
+        mapFrameId_, trackPointFrameId_, rclcpp::Time(0), rclcpp::Duration::from_seconds(5.0));
+  } catch (tf2::TransformException& ex) {
+    RCLCPP_WARN_THROTTLE(
+        nodeHandle_->get_logger(),
+        *nodeHandle_->get_clock(),
+        2000,
+        "Skipping fused map publish until TF %s <- %s is available: %s",
+        mapFrameId_.c_str(),
+        trackPointFrameId_.c_str(),
+        ex.what());
+    return;
+  }
   tf2::fromMsg(transform_msg, transform);
   double roll, pitch, yaw;
 

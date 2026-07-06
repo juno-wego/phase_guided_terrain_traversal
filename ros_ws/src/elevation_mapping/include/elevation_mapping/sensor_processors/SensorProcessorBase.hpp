@@ -135,6 +135,14 @@ class SensorProcessorBase {
   bool transformPointCloud(PointCloudType::ConstPtr pointCloud, PointCloudType::Ptr pointCloudTransformed, const std::string& targetFrame);
 
   /*!
+   * Removes points inside a fixed box expressed in the robot base frame.
+   * This is useful for rejecting robot-body and leg returns before mapping.
+   * @param[in,out] pointCloudSensorFrame the point cloud to be cropped.
+   * @return true if successful.
+   */
+  bool removePointsInsideRobotBody(const PointCloudType::Ptr pointCloudSensorFrame);
+
+  /*!
    * Removes points with z-coordinate above a limit in map frame.
    * @param[in/out] pointCloud the point cloud to be cropped.
    */

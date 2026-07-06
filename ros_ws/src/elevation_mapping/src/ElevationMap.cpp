@@ -6,6 +6,7 @@
  *	 Institute: ETH Zurich, ANYbotics
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -44,6 +45,29 @@ float intAsFloat(const uint32_t input) {
   std::memcpy(&output, &input, sizeof(uint32_t));
   return output;
 }
+
+std::size_t readPostprocessorThreadCount(const std::shared_ptr<rclcpp::Node>& nodeHandle) {
+  if (!nodeHandle->has_parameter("postprocessor_num_threads")) {
+    nodeHandle->declare_parameter("postprocessor_num_threads", 1);
+  }
+
+  const int configuredThreads = nodeHandle->get_parameter("postprocessor_num_threads").as_int();
+  if (configuredThreads < 1) {
+    RCLCPP_WARN(
+        nodeHandle->get_logger(),
+        "Parameter 'postprocessor_num_threads' must be at least 1. Falling back to 1.");
+    return 1;
+  }
+
+  return static_cast<std::size_t>(configuredThreads);
+}
+
+bool readHeightMapPublishingEnabled(const std::shared_ptr<rclcpp::Node>& nodeHandle) {
+  if (!nodeHandle->has_parameter("publish_heightmap")) {
+    nodeHandle->declare_parameter("publish_heightmap", true);
+  }
+  return nodeHandle->get_parameter("publish_heightmap").as_bool();
+}
 }  // namespace
 
 namespace elevation_mapping {
@@ -55,7 +79,7 @@ ElevationMap::ElevationMap(std::shared_ptr<rclcpp::Node> nodeHandle)
       "sensor_x_at_lowest_scan", "sensor_y_at_lowest_scan", "sensor_z_at_lowest_scan"}),
       fusedMap_({"elevation", "upper_bound", "lower_bound", "color"}),
       // FIXME: Postprocessor num threads should be same as number of filters
-      postprocessorPool_(nodeHandle_->get_parameter("postprocessor_num_threads").as_int(), nodeHandle_),
+      postprocessorPool_(readPostprocessorThreadCount(nodeHandle), nodeHandle_),
       hasUnderlyingMap_(false),
       minVariance_(0.000009),
       maxVariance_(0.0009),
@@ -72,7 +96,9 @@ ElevationMap::ElevationMap(std::shared_ptr<rclcpp::Node> nodeHandle)
   clear();
 
   elevationMapFusedPublisher_ = nodeHandle_->create_publisher<grid_map_msgs::msg::GridMap>("elevation_map", 1);
-  // heightMapFusedPublisher_ = nodeHandle_->create_publisher<sensor_msgs::msg::PointCloud2>("elevation_heightmap", 1);
+  if (readHeightMapPublishingEnabled(nodeHandle_)) {
+    heightMapFusedPublisher_ = nodeHandle_->create_publisher<sensor_msgs::msg::PointCloud2>("elevation_heightmap", 1);
+  }
 
 
 
@@ -603,15 +629,21 @@ bool ElevationMap::applyInpaintingFilter(const grid_map::GridMap& input_map, gri
   return true;
 }
 bool ElevationMap::publishFusedElevationMap() {
-  if (!hasFusedMapSubscribers()) {
+  const bool publishGridMap = elevationMapFusedPublisher_->get_subscription_count() >= 1;
+  const bool publishHeightMap =
+      heightMapFusedPublisher_ && heightMapFusedPublisher_->get_subscription_count() >= 1;
+
+  if (!publishGridMap && !publishHeightMap) {
     return false;
   }
-  boost::recursive_mutex::scoped_lock scopedLock(fusedMapMutex_);
-  grid_map::GridMap fusedMapCopy = fusedMap_;
-  scopedLock.unlock();
-  fusedMapCopy.add("uncertainty_range", fusedMapCopy.get("upper_bound") - fusedMapCopy.get("lower_bound"));
-  std::unique_ptr<grid_map_msgs::msg::GridMap> message;
-  message = grid_map::GridMapRosConverter::toMessage(fusedMapCopy);
+
+  if (publishGridMap) {
+    boost::recursive_mutex::scoped_lock scopedLock(fusedMapMutex_);
+    grid_map::GridMap fusedMapCopy = fusedMap_;
+    scopedLock.unlock();
+    fusedMapCopy.add("uncertainty_range", fusedMapCopy.get("upper_bound") - fusedMapCopy.get("lower_bound"));
+    std::unique_ptr<grid_map_msgs::msg::GridMap> message;
+    message = grid_map::GridMapRosConverter::toMessage(fusedMapCopy);
 
 
   // nodeHandle_->declare_parameter("filters_names", std::string("filters"));
@@ -643,8 +675,13 @@ bool ElevationMap::publishFusedElevationMap() {
   // std::unique_ptr<grid_map_msgs::msg::GridMap> message;
   // message = grid_map::GridMapRosConverter::toMessage(outputMap);
 
-  elevationMapFusedPublisher_->publish(std::move(message));
-  // heightMapFusedPublisher_->publish(heightmap_msg);
+    elevationMapFusedPublisher_->publish(std::move(message));
+  }
+
+  if (publishHeightMap) {
+    heightmap_msg.header.stamp = nodeHandle_->get_clock()->now();
+    heightMapFusedPublisher_->publish(heightmap_msg);
+  }
   // RCLCPP_DEBUG(nodeHandle_->get_logger(), "Elevation map (fused) has been published.");
   return true;
 }
@@ -734,7 +771,10 @@ float ElevationMap::cumulativeDistributionFunction(float x, float mean, float st
 }
 
 bool ElevationMap::hasFusedMapSubscribers() const {
-  return elevationMapFusedPublisher_->get_subscription_count() >= 1;
+  const bool hasGridMapSubscribers = elevationMapFusedPublisher_->get_subscription_count() >= 1;
+  const bool hasHeightMapSubscribers =
+      heightMapFusedPublisher_ && heightMapFusedPublisher_->get_subscription_count() >= 1;
+  return hasGridMapSubscribers || hasHeightMapSubscribers;
 }
 
   // return (elevationMapFusedPublisher_->get_subscription_count() >= 1 || heightMapFusedPublisher_->get_subscription_count() >= 1 );
@@ -854,6 +894,10 @@ boost::recursive_mutex& ElevationMap::getRawDataMutex() {
 
 
 void ElevationMap::getHeightMap(const Eigen::Vector3d& position, double yaw) {
+    if (!heightMapFusedPublisher_ || heightMapFusedPublisher_->get_subscription_count() < 1) {
+        return;
+    }
+
     Eigen::Matrix2f R_W2H;
     R_W2H << std::cos(yaw),  std::sin(yaw),
             -std::sin(yaw),  std::cos(yaw);
