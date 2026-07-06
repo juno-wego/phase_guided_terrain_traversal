@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import Imu
 from sensor_msgs.msg import PointCloud2, PointField
@@ -25,12 +26,12 @@ import os
 class Repuber(Node):
     def __init__(self):
         super().__init__('sensor_transformer')
-        self.imu_sub = self.create_subscription(Imu, '/utlidar/imu', self.imu_callback, 50)
-        self.cloud_sub = self.create_subscription(PointCloud2, '/utlidar/cloud', self.cloud_callback, 50)
+        self.imu_sub = self.create_subscription(Imu, '/utlidar/imu', self.imu_callback, qos_profile_sensor_data)
+        self.cloud_sub = self.create_subscription(PointCloud2, '/utlidar/cloud', self.cloud_callback, qos_profile_sensor_data)
         
-        self.imu_raw_pub = self.create_publisher(Imu, '/utlidar/transformed_raw_imu', 50)
-        self.imu_pub = self.create_publisher(Imu, '/utlidar/transformed_imu', 50)
-        self.cloud_pub = self.create_publisher(PointCloud2, '/utlidar/transformed_cloud', 50)
+        self.imu_raw_pub = self.create_publisher(Imu, '/utlidar/transformed_raw_imu', qos_profile_sensor_data)
+        self.imu_pub = self.create_publisher(Imu, '/utlidar/transformed_imu', qos_profile_sensor_data)
+        self.cloud_pub = self.create_publisher(PointCloud2, '/utlidar/transformed_cloud', qos_profile_sensor_data)
 
         self.imu_stationary_list = []
         

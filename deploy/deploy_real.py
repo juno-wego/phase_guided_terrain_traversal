@@ -96,7 +96,7 @@ _parser.add_argument('--method', type=str, default='pgtt', help='Method: pgtt, b
 _parser.add_argument('--level', type=str, default='level03', help='Terrain level: level03, level07, etc.')
 _parser.add_argument('--run', type=int, default=0, help='Run number')
 _parser.add_argument('--policy-file', type=str, default=None, help='Explicit policy file path')
-_parser.add_argument('--command_type', type=str, default='controller', help='Command source: controller, fixed, or cmd_vel')
+_parser.add_argument('--command_type', type=str, default='hybrid', help='Command source: hybrid, controller, fixed, or cmd_vel')
 _parser.add_argument('--vx', type=float, default=0.2, help='Forward speed when using fixed command')
 _parser.add_argument('--vy', type=float, default=0.0, help='Lateral speed when using fixed command')
 _parser.add_argument('--yaw', type=float, default=0.0, help='Yaw rate when using fixed command')
@@ -104,12 +104,15 @@ _parser.add_argument('--cmd-vel-topic', type=str, default='/cmd_vel', help='ROS 
 _parser.add_argument('--network', type=str, default=None, help='Network interface for ChannelFactoryInitialize')
 _parser.add_argument('--auto-arm', action='store_true', help='Start the policy automatically after the stand-up sequence')
 _parser.add_argument('--no-prompt', action='store_true', help='Skip the interactive safety prompt')
+_parser.add_argument('--debug-inputs', action='store_true', help='Print policy input diagnostics periodically')
+_parser.add_argument('--debug-print-hz', type=float, default=1.0, help='Diagnostic print rate when --debug-inputs is enabled')
 _args, _ = _parser.parse_known_args()
 
 mode = _args.method
 command_type = _args.command_type
 filename = _args.policy_file or f"policies/policy_{_args.robot}_{_args.method}_{_args.level}_run{_args.run}"
 cmd_fixed = np.array([_args.vx, _args.vy, _args.yaw])
+controller_deadband = 0.05
 
 PHASES=np.array([0.,np.pi,np.pi,0.])
 ctrl_dt=0.02
@@ -139,15 +142,28 @@ if Node is not None and Twist is not None:
             super().__init__('pgtt_cmd_vel_listener')
             self._lock = threading.Lock()
             self._latest_cmd = np.zeros(3, dtype=float)
+            self._last_msg_time = 0.0
+            self._timeout_sec = 0.3
             self.create_subscription(Twist, topic_name, self.cmd_vel_callback, 10)
 
         def cmd_vel_callback(self, msg: Twist) -> None:
             with self._lock:
                 self._latest_cmd[:] = [msg.linear.x, msg.linear.y, msg.angular.z]
+                self._last_msg_time = time.monotonic()
 
         def get_velocity(self) -> np.ndarray:
             with self._lock:
+                if self._last_msg_time <= 0.0:
+                    return np.zeros(3, dtype=float)
+                if time.monotonic() - self._last_msg_time > self._timeout_sec:
+                    return np.zeros(3, dtype=float)
                 return self._latest_cmd.copy()
+
+        def get_status(self):
+            with self._lock:
+                if self._last_msg_time <= 0.0:
+                    return False, None
+                return True, time.monotonic() - self._last_msg_time
 else:
     CmdVelSubscriber = None
 
@@ -288,8 +304,15 @@ class Custom():
         self.ros_enabled = False
         self.low_level_entered = False
         self.handover_completed = False
+        self.active_command_source = "idle"
+        self.debug_inputs = _args.debug_inputs
+        self.debug_print_period = 0.0 if _args.debug_print_hz <= 0.0 else 1.0 / _args.debug_print_hz
+        self.last_debug_print_time = 0.0
+        self.last_heightmap_time = 0.0
+        self.last_heightmap_width = num_widthscans
+        self.last_heightmap_height = num_heightscans
 
-        if command_type == "cmd_vel":
+        if command_type in {"cmd_vel", "hybrid"}:
             self.init_cmd_vel_subscriber()
 
     def Init(self):
@@ -334,19 +357,47 @@ class Custom():
         self.ros_enabled = True
         print(f"Listening for velocity commands on '{_args.cmd_vel_topic}'.")
 
+    def get_controller_command(self) -> np.ndarray:
+        return np.array([
+            cmd_scale[0] * self.remote_controller.ly,
+            cmd_scale[1] * self.remote_controller.lx * -1,
+            cmd_scale[2] * self.remote_controller.rx * -1,
+        ], dtype=float)
+
     def update_command(self):
         if command_type == "controller":
-            self.cmd[0] = cmd_scale[0]*self.remote_controller.ly
-            self.cmd[1] = cmd_scale[1]*self.remote_controller.lx * -1
-            self.cmd[2] = cmd_scale[2]*self.remote_controller.rx * -1
+            self.cmd = self.get_controller_command()
+            self.active_command_source = "controller"
         elif command_type == "cmd_vel":
             if self.cmd_vel_node is None:
                 self.cmd = np.zeros(3)
+                self.active_command_source = "idle"
                 return
             rclpy.spin_once(self.cmd_vel_node, timeout_sec=0.0)
             self.cmd = self.cmd_vel_node.get_velocity()
+            self.active_command_source = "cmd_vel" if np.linalg.norm(self.cmd) > 1e-4 else "idle"
+        elif command_type == "hybrid":
+            controller_cmd = self.get_controller_command()
+            controller_active = np.max(np.abs(controller_cmd)) > controller_deadband
+
+            cmd_vel_cmd = np.zeros(3)
+            if self.cmd_vel_node is not None:
+                rclpy.spin_once(self.cmd_vel_node, timeout_sec=0.0)
+                cmd_vel_cmd = self.cmd_vel_node.get_velocity()
+            cmd_vel_active = np.linalg.norm(cmd_vel_cmd) > 1e-4
+
+            if controller_active:
+                self.cmd = controller_cmd
+                self.active_command_source = "controller"
+            elif cmd_vel_active:
+                self.cmd = cmd_vel_cmd
+                self.active_command_source = "cmd_vel"
+            else:
+                self.cmd = np.zeros(3)
+                self.active_command_source = "idle"
         else:
             self.cmd = cmd_fixed.copy()
+            self.active_command_source = "fixed"
 
     def shutdown(self):
         # The low-level recurrent thread is still active until process exit.
@@ -406,12 +457,59 @@ class Custom():
         
         width = msg.width
         height = msg.height
+        self.last_heightmap_time = time.monotonic()
+        self.last_heightmap_width = width
+        self.last_heightmap_height = height
 
         for i, point in enumerate(read_points(msg, field_names=("x", "y", "z"), skip_nans=False)):
             _, _, z = point
             row = i // width
             col = i % width
             self.heightmap[row, col] = z
+
+    def maybe_print_input_debug(self, obs: np.ndarray, z_values: np.ndarray, z_normal: np.ndarray) -> None:
+        if not self.debug_inputs:
+            return
+
+        now = time.monotonic()
+        if self.debug_print_period > 0.0 and (now - self.last_debug_print_time) < self.debug_print_period:
+            return
+        self.last_debug_print_time = now
+
+        center_row = self.heightmap.shape[0] // 2
+        center_col = self.heightmap.shape[1] // 2
+        front_row = self.heightmap.shape[0] - 1
+
+        if self.last_heightmap_time > 0.0:
+            heightmap_age_text = f"{now - self.last_heightmap_time:.2f}s"
+        else:
+            heightmap_age_text = "never"
+
+        if command_type == "cmd_vel" and self.cmd_vel_node is not None:
+            has_cmd, cmd_age = self.cmd_vel_node.get_status()
+            cmd_age_text = f"{cmd_age:.2f}s" if has_cmd and cmd_age is not None else "never"
+        elif command_type == "hybrid" and self.cmd_vel_node is not None:
+            has_cmd, cmd_age = self.cmd_vel_node.get_status()
+            cmd_age_text = f"{cmd_age:.2f}s" if has_cmd and cmd_age is not None else "never"
+        else:
+            cmd_age_text = "n/a"
+
+        controller_cmd = self.get_controller_command()
+        print(
+            "[policy-input] "
+            f"src={command_type}/{self.active_command_source} "
+            f"cmd=[{self.cmd[0]:+.3f} {self.cmd[1]:+.3f} {self.cmd[2]:+.3f}] "
+            f"controller=[{controller_cmd[0]:+.3f} {controller_cmd[1]:+.3f} {controller_cmd[2]:+.3f}] "
+            f"cmd_age={cmd_age_text} "
+            f"heightmap_age={heightmap_age_text} "
+            f"heightmap_shape={self.last_heightmap_height}x{self.last_heightmap_width} "
+            f"z_min={np.min(z_values):+.3f} "
+            f"z_max={np.max(z_values):+.3f} "
+            f"z_center={self.heightmap[center_row, center_col]:+.3f} "
+            f"z_front_center={self.heightmap[front_row, center_col]:+.3f} "
+            f"z_norm_max={np.max(z_normal):+.3f} "
+            f"obs_dim={obs.size}"
+        )
         
     def LowCmdWrite(self):
         if self.low_state is None:
@@ -607,6 +705,8 @@ class Custom():
                     self.action,#12
                     self.cmd,#3
             ])        # self.obs[:3]
+
+        self.maybe_print_input_debug(obs, z_values, z_normal)
     
         obs_tensor=torch.tensor(np.asarray(obs).copy(), dtype=torch.float32).reshape((1,-1))
         self.action = self.policy_network(obs_tensor).detach().numpy().squeeze()

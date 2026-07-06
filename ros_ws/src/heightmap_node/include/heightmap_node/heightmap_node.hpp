@@ -39,6 +39,8 @@ private:
   std::string input_name;
   std::string output_name;
   std::string layer;
+  std::string map_frame_;
+  std::string base_frame_;
 
 };
 

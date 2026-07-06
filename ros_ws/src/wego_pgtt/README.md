@@ -166,6 +166,61 @@ ros2 launch wego_pgtt go2_stair_policy_mode.launch.py \
 Ctrl+C
 ```
 
+## Elevation Mapping
+
+Go2 라이다 elevation map + heightmap 실행:
+
+```bash
+cd /home/wego/phase_guided_terrain_traversal/ros_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch wego_pgtt go2_elevation_mapping.launch.py
+```
+
+RViz까지 같이 띄우려면:
+
+```bash
+ros2 launch wego_pgtt go2_elevation_mapping.launch.py rviz:=true
+```
+
+heightmap 출력 토픽을 바꾸려면:
+
+```bash
+ros2 launch wego_pgtt go2_elevation_mapping.launch.py \
+  heightmap_output:=/elevation_heightmap
+```
+
+heightmap 크기와 샘플 간격을 바꾸려면:
+
+```bash
+ros2 launch wego_pgtt go2_elevation_mapping.launch.py \
+  heightmap_rows:=11 \
+  heightmap_cols:=9 \
+  heightmap_dx:=0.1 \
+  heightmap_dy:=0.1
+```
+
+현재 레포 기준 실행 체인:
+
+```text
+/utlidar/cloud, /utlidar/imu
+-> transform_sensors
+-> /utlidar/transformed_cloud, /utlidar/transformed_imu
+-> point_lio
+-> /cloud_registered, /aft_mapped_to_init
+-> elevation_mapping
+-> /elevation_map
+-> heightmap_node
+-> /elevation_heightmap
+```
+
+주의:
+
+```text
+- /utlidar/cloud, /utlidar/imu 는 다른 드라이버가 먼저 올리고 있어야 함
+- heightmap_node 입력은 현재 코드 기준으로 /elevation_map, layer=elevation 사용
+```
+
 ## 확인용 명령
 
 노드 확인:

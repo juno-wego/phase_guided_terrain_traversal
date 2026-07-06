@@ -11,12 +11,14 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description():
     package_share = get_package_share_directory("wego_pgtt")
     repo_root = os.path.abspath(os.path.join(package_share, "..", "..", "..", "..", ".."))
-    default_policy = os.path.join(repo_root, "policies", "policy_go2_pgtt_level20_run0")
+    default_policy = os.path.join(repo_root, "policies", "policy_go2_pgtt_level13_run0")
     default_interface = os.environ.get("GO2_IFACE", "")
 
     return LaunchDescription([
         DeclareLaunchArgument("policy_file", default_value=default_policy),
-        DeclareLaunchArgument("command_source", default_value="controller"),
+        DeclareLaunchArgument("command_source", default_value="hybrid"),
+        DeclareLaunchArgument("debug_inputs", default_value="false"),
+        DeclareLaunchArgument("debug_print_hz", default_value="1.0"),
         DeclareLaunchArgument("auto_start_go2_driver", default_value="true"),
         DeclareLaunchArgument("go2_driver_setup", default_value="/home/wego/dddmr_navigation/install/setup.bash"),
         Node(
@@ -29,6 +31,14 @@ def generate_launch_description():
                 "repo_root": repo_root,
                 "policy_file": LaunchConfiguration("policy_file"),
                 "command_source": LaunchConfiguration("command_source"),
+                "debug_inputs": ParameterValue(
+                    LaunchConfiguration("debug_inputs"),
+                    value_type=bool,
+                ),
+                "debug_print_hz": ParameterValue(
+                    LaunchConfiguration("debug_print_hz"),
+                    value_type=float,
+                ),
                 "network_interface": default_interface,
                 "cmd_vel_topic": "/cmd_vel",
                 "motion_service_name": "/go2_motion_cmd",

@@ -25,7 +25,9 @@ class PolicyModeServer(Node):
         self.declare_parameter("python_executable", sys.executable)
         self.declare_parameter("robot", "go2")
         self.declare_parameter("method", "pgtt")
-        self.declare_parameter("command_source", "controller")
+        self.declare_parameter("command_source", "hybrid")
+        self.declare_parameter("debug_inputs", False)
+        self.declare_parameter("debug_print_hz", 1.0)
         self.declare_parameter("cmd_vel_topic", "/cmd_vel")
         self.declare_parameter("motion_service_name", "/go2_motion_cmd")
         self.declare_parameter("go2_driver_setup", "/home/wego/dddmr_navigation/install/setup.bash")
@@ -42,6 +44,8 @@ class PolicyModeServer(Node):
         self.robot = self.get_parameter("robot").get_parameter_value().string_value
         self.method = self.get_parameter("method").get_parameter_value().string_value
         self.command_source = self.get_parameter("command_source").get_parameter_value().string_value
+        self.debug_inputs = self.get_parameter("debug_inputs").get_parameter_value().bool_value
+        self.debug_print_hz = self.get_parameter("debug_print_hz").get_parameter_value().double_value
         self.cmd_vel_topic = self.get_parameter("cmd_vel_topic").get_parameter_value().string_value
         self.motion_service_name = self.get_parameter("motion_service_name").get_parameter_value().string_value
         self.go2_driver_setup = self.get_parameter("go2_driver_setup").get_parameter_value().string_value
@@ -65,7 +69,7 @@ class PolicyModeServer(Node):
     def handle_toggle(self, request, response):
         del request
         if self.process is not None and self.process.poll() is None:
-            self.stop_policy_process()
+            self.stop_policy_process(request_restore=True)
             response.success = True
             response.message = "Stopping PGTT policy mode and returning to classic mode."
             return response
@@ -116,8 +120,11 @@ class PolicyModeServer(Node):
             command_source,
             "--no-prompt",
         ]
-        if command_source == "cmd_vel":
+        if command_source in {"cmd_vel", "hybrid"}:
             cmd.extend(["--cmd-vel-topic", self.cmd_vel_topic])
+        if self.debug_inputs:
+            cmd.append("--debug-inputs")
+            cmd.extend(["--debug-print-hz", str(self.debug_print_hz)])
         if self.network_interface:
             cmd.extend(["--network", self.network_interface])
         if self.auto_arm:
@@ -128,7 +135,7 @@ class PolicyModeServer(Node):
         self.needs_restore = True
 
     def normalize_command_source(self, command_source: str) -> str:
-        valid_sources = {"controller", "cmd_vel", "fixed"}
+        valid_sources = {"controller", "cmd_vel", "fixed", "hybrid"}
         if command_source not in valid_sources:
             raise RuntimeError(
                 f"Unsupported command_source '{command_source}'. "
@@ -136,7 +143,7 @@ class PolicyModeServer(Node):
             )
         return command_source
 
-    def stop_policy_process(self) -> None:
+    def stop_policy_process(self, request_restore: bool = False) -> None:
         if self.process is None or self.process.poll() is not None:
             return
         self.get_logger().info("Stopping PGTT policy process.")
@@ -144,6 +151,23 @@ class PolicyModeServer(Node):
         deadline = time.time() + 8.0
         while self.process.poll() is None and time.time() < deadline:
             time.sleep(0.05)
+
+        if self.process.poll() is None:
+            self.get_logger().warning("PGTT policy process did not stop on SIGINT. Escalating to SIGTERM.")
+            self.process.terminate()
+            deadline = time.time() + 4.0
+            while self.process.poll() is None and time.time() < deadline:
+                time.sleep(0.05)
+
+        return_code = self.process.poll()
+        if return_code is None:
+            self.get_logger().warning("PGTT policy process did not terminate cleanly.")
+            return
+
+        self.get_logger().info(f"PGTT policy process exited with code {return_code}.")
+        self.process = None
+        self.stop_motion_service_process()
+        self.finish_restore_flow(return_code=return_code, force_restore=request_restore)
 
     def poll_policy_process(self) -> None:
         if self.process is None:
@@ -155,11 +179,17 @@ class PolicyModeServer(Node):
 
         self.get_logger().info(f"PGTT policy process exited with code {return_code}.")
         self.process = None
-
-        if self.needs_restore and self.restore_to_classic and return_code != 0:
-            self.restore_classic_mode()
-        self.needs_restore = False
         self.stop_motion_service_process()
+        self.finish_restore_flow(return_code=return_code, force_restore=False)
+
+    def finish_restore_flow(self, return_code: int, force_restore: bool) -> None:
+        if not self.needs_restore:
+            return
+
+        should_restore = self.restore_to_classic and (force_restore or return_code != 0)
+        self.needs_restore = False
+        if should_restore:
+            self.restore_classic_mode()
 
     def build_pythonpath(self, env) -> str:
         entries = []
@@ -205,15 +235,13 @@ class PolicyModeServer(Node):
             switcher.Init()
 
             self.log_mode_state("CheckMode(before restore)", switcher.CheckMode())
-            self.log_sdk_result("SelectMode(advanced)", switcher.SelectMode("advanced"))
+            self.log_sdk_result("SelectMode(normal)", switcher.SelectMode("normal"))
             time.sleep(0.5)
             self.log_sdk_result("RecoveryStand", sport.RecoveryStand())
             time.sleep(0.5)
             self.log_sdk_result("StopMove", sport.StopMove())
             time.sleep(0.2)
-            self.log_sdk_result("ClassicWalk(False)", sport.ClassicWalk(False))
-            time.sleep(0.2)
-            self.log_sdk_result("SwitchJoystick(False)", sport.SwitchJoystick(False))
+            self.log_sdk_result("SwitchJoystick(True)", sport.SwitchJoystick(True))
             time.sleep(0.2)
             self.log_mode_state("CheckMode(after restore)", switcher.CheckMode())
         except Exception as exc:
@@ -237,7 +265,7 @@ class PolicyModeServer(Node):
             return False
 
         tasks = [
-            ("SETSPORTSMODE", 13),
+            ("SETNORMALMODE", 11),
             ("RECOVERY_STAND", 5),
             ("STOP_MOVE", 2),
         ]

@@ -9,8 +9,19 @@
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>std_srvs</exec_depend>
+  <exec_depend>transform_sensors</exec_depend>
+  <exec_depend>point_lio</exec_depend>
+  <exec_depend>go2_base</exec_depend>
+  <exec_depend>go2_description</exec_depend>
+  <exec_depend>elevation_mapping</exec_depend>
+  <exec_depend>heightmap_node</exec_depend>
+  <exec_depend>grid_map_filter_node</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

@@ -14,7 +14,9 @@ namespace elevation_mapping {
 InputSourceManager::InputSourceManager(const std::shared_ptr<rclcpp::Node>& nodeHandle) : nodeHandle_(nodeHandle) {}
 
 bool InputSourceManager::configureFromRos(const std::string& inputSourcesNamespace) {
-  nodeHandle_->declare_parameter("inputs", std::vector<std::string>());
+  if (!nodeHandle_->has_parameter("inputs")) {
+    nodeHandle_->declare_parameter("inputs", std::vector<std::string>());
+  }
 
   // Configure the visualizations from a configuration stored on the parameter server.
   std::vector<std::string> inputSourcesConfiguration;

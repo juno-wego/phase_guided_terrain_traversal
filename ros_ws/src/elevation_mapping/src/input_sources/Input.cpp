@@ -24,12 +24,18 @@ bool Input::configure(std::string& inputSourceName, const std::string& sourceCon
   Parameters parameters;
 
   std::string sensorProcessorType;
-  
-  nodeHandle_->declare_parameter(inputSourceName + ".topic","");
-  nodeHandle_->declare_parameter(inputSourceName + ".queue_size",1);
-  nodeHandle_->declare_parameter(inputSourceName + ".publish_on_update",true);
-  nodeHandle_->declare_parameter(inputSourceName + ".sensor_processor.type","");
-  nodeHandle_->declare_parameter(inputSourceName + ".type","");
+
+  auto declareParameterIfMissing = [&](const std::string& name, const auto& defaultValue) {
+    if (!nodeHandle_->has_parameter(name)) {
+      nodeHandle_->declare_parameter(name, defaultValue);
+    }
+  };
+
+  declareParameterIfMissing(inputSourceName + ".topic", std::string());
+  declareParameterIfMissing(inputSourceName + ".queue_size", 1);
+  declareParameterIfMissing(inputSourceName + ".publish_on_update", true);
+  declareParameterIfMissing(inputSourceName + ".sensor_processor.type", std::string());
+  declareParameterIfMissing(inputSourceName + ".type", std::string());
 
   if (!nodeHandle_->get_parameter(inputSourceName + ".type", parameters.type_)){
     RCLCPP_ERROR(nodeHandle_->get_logger(), "Could not configure input source %s because no type was given.", inputSourceName.c_str());
