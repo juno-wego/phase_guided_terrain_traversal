@@ -40,8 +40,8 @@ ACCELEROMETER_SENSOR = "accelerometer"
 GYRO_SENSOR = "gyro"
 
 # ---- Heightmap parameters ----
-dist_x = 0.15
-dist_y = 0.15
+dist_x = 0.10
+dist_y = 0.10
 num_heightscans = 11
 num_widthscans = 9
 

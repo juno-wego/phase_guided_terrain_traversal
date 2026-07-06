@@ -36,6 +36,8 @@ private:
   int num_widthscans;
   double dist_x;
   double dist_y;
+  double forward_offset_;
+  double lateral_offset_;
   std::string input_name;
   std::string output_name;
   std::string layer;
@@ -45,4 +47,3 @@ private:
 };
 
 #endif  // HEIGHTMAP_NODE__HEIGHTMAP_NODE_HPP_
-

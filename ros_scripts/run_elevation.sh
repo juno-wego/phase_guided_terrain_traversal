@@ -36,7 +36,8 @@ exec ros2 launch wego_pgtt go2_elevation_mapping.launch.py \
   use_grid_map_filter:=false \
   heightmap_input:=/elevation_map \
   heightmap_layer:=elevation \
-  heightmap_dx:=0.16 \
+  heightmap_dx:=0.10 \
+  heightmap_forward_offset:=0.20 \
   map_length_x:=4.0 \
   map_length_y:=4.0 \
   map_resolution:=0.02 \

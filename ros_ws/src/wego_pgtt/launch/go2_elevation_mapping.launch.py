@@ -201,6 +201,16 @@ def generate_launch_description():
             description="Lateral spacing between heightmap samples in meters.",
         ),
         DeclareLaunchArgument(
+            "heightmap_forward_offset",
+            default_value="0.0",
+            description="Forward shift of the exported heightmap center in robot frame meters.",
+        ),
+        DeclareLaunchArgument(
+            "heightmap_lateral_offset",
+            default_value="0.0",
+            description="Lateral shift of the exported heightmap center in robot frame meters.",
+        ),
+        DeclareLaunchArgument(
             "map_length_x",
             default_value="3.0",
             description="Elevation map length in X in meters.",
@@ -649,6 +659,14 @@ def generate_launch_description():
                 ),
                 "dist_y": ParameterValue(
                     LaunchConfiguration("heightmap_dy"),
+                    value_type=float,
+                ),
+                "forward_offset": ParameterValue(
+                    LaunchConfiguration("heightmap_forward_offset"),
+                    value_type=float,
+                ),
+                "lateral_offset": ParameterValue(
+                    LaunchConfiguration("heightmap_lateral_offset"),
                     value_type=float,
                 ),
             }],

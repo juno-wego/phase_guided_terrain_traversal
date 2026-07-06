@@ -478,7 +478,7 @@ class Custom():
 
         center_row = self.heightmap.shape[0] // 2
         center_col = self.heightmap.shape[1] // 2
-        front_row = self.heightmap.shape[0] - 1
+        front_row = 0
 
         if self.last_heightmap_time > 0.0:
             heightmap_age_text = f"{now - self.last_heightmap_time:.2f}s"

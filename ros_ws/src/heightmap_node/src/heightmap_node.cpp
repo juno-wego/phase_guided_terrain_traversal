@@ -64,6 +64,10 @@ void HeightmapNode::getHeightMap(grid_map::GridMap& map, const Eigen::Vector3d& 
     Eigen::Matrix2f R_W2H;
     R_W2H << std::cos(yaw),  std::sin(yaw),
             -std::sin(yaw),  std::cos(yaw);
+    const Eigen::Vector2f center_offset_local(
+      static_cast<float>(forward_offset_),
+      static_cast<float>(lateral_offset_));
+    const Eigen::Vector2f center_offset_world = R_W2H * center_offset_local;
     const float fallback_elevation = static_cast<float>(position.z());
 
     float c_h = (num_heightscans - 1) / 2.0f;
@@ -76,7 +80,9 @@ void HeightmapNode::getHeightMap(grid_map::GridMap& map, const Eigen::Vector3d& 
             Eigen::Vector2f offset(dx, dy);
             offset = R_W2H * offset;
 
-            Eigen::Vector2d query_pos(position.x() + offset.x(), position.y() + offset.y());
+            Eigen::Vector2d query_pos(
+              position.x() + center_offset_world.x() + offset.x(),
+              position.y() + center_offset_world.y() + offset.y());
 
             grid_map::Position gridPos(query_pos.x(), query_pos.y());
             grid_map::Index index;
@@ -106,6 +112,8 @@ void HeightmapNode::read_parameters(){
   this->declare_parameter("num_widthscans",7);
   this->declare_parameter("dist_x",0.08);
   this->declare_parameter("dist_y",0.08);
+  this->declare_parameter("forward_offset",0.0);
+  this->declare_parameter("lateral_offset",0.0);
   this->declare_parameter("output","elevation_heightmap");
   this->declare_parameter("input","elevation_map");
   this->declare_parameter("layer","elevation");
@@ -116,6 +124,8 @@ void HeightmapNode::read_parameters(){
   this->get_parameter("num_widthscans",num_widthscans);
   this->get_parameter("dist_x",dist_x);
   this->get_parameter("dist_y",dist_y);
+  this->get_parameter("forward_offset",forward_offset_);
+  this->get_parameter("lateral_offset",lateral_offset_);
   this->get_parameter("input",input_name);
   this->get_parameter("output",output_name);
   this->get_parameter("layer",layer);
